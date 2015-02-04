@@ -1,0 +1,141 @@
+package Interface;
+use Data::Dumper;
+
+my $ST_Interface;
+sub new{ 
+    return $ST_Interface if defined $ST_Interface;
+    $ST_Interface  = bless {} ,shift;
+    $ST_Interface->_initialize_();
+    $ST_Interface;
+}
+
+sub _initialize_ {
+        my $self=shift;
+        $self->{cb_list} = ();
+        $self->{error}='';
+}
+
+sub _get_self_ {
+    my $class = shift;
+    my $self =  ref $class ? $class : $class->new();
+    $self;
+}
+
+sub callback {
+    my $self = _get_self_(shift);
+    if (@_){   # run callback 
+        my $callback = shift;
+        push @{ $self->{cb_list} } , $callback ;
+        #&$callback if ref($callback) eq "CODE"
+        return 1;
+    }
+    return $self->{cb_list};
+}
+
+sub cb_list {
+    my $self = _get_self_(shift);
+    return @{ $self->{cb_list} };
+}
+
+sub run_callback {
+    my $self = _get_self_(shift);
+    for my $cb ( $self->cb_list() ){
+        last if $self->$cb(@_);
+    }
+    return 0
+}
+
+    Interface->callback(add_channel);
+    Interface->callback(config_channel);
+    Interface->callback(open_channel);
+    Interface->callback(close_channel);
+    Interface->callback(delete_channel);
+    Interface->callback(list_channel);
+    Interface->callback(list_clients);
+    Interface->callback(select_file);
+    Interface->callback(add_file);
+    Interface->callback(config_file);
+    Interface->callback(file_list);
+    Interface->callback(set_file_position);
+    Interface->callback(get_file_position);
+    Interface->callback(send_data);
+
+#foreach my $field ( qw(_add_channel_ _config_channel_ _open_channel_ _close_channel_ _delete_channel_ _list_channel_ _list_clients_ _select_file_ _add_file_ _config_file_ _file_list_ _set_file_position_ _get_file_position_ _send_data_) ){
+foreach my $field ( qw(_add_channel_ _config_channel_ _open_channel_ _close_channel_ _delete_channel_ _list_channel_ ) ){
+    Interface->callback($field);
+    *{"$field"} = sub {
+        my $self = _get_self_(shift);
+        my $func_name = $field;
+        $func_name =~ s/^_|_$//g;
+        my $return = eval { $self->$func_name(@_) };
+        return $return;
+    };
+}
+
+sub add_channel {
+    my $self  = shift;
+    my $index = shift;
+    my $args  = join " ", @_;
+    if ($args =~ /^add_channel\s+(.+?)$/){
+        my $var_channel = $1;
+        print "sub: Interface add_channel ===> '$var_channel'\n";
+        Kraken->add_channel($var_channel);
+        Kraken->channels_list();
+        Kraken->send_client($index,"Алаверды '$args'\n");
+        return 1
+    }
+    return 0
+}
+
+sub delete_channel {
+    my $self=shift;
+    my $args = join " ", @_;
+    if ($args =~ /^delete_channel\s+(.+?)$/){
+        my $var_channel = $1;
+        print "INFO: Interface::delete_channel() '$var_channel'\n";
+        Kraken->delete_channel($var_channel);
+        Kraken->channels_list();
+        return 1
+    }
+    return 0
+}
+
+sub config_channel {
+    my $self=shift;
+    my $args = join " ", @_;
+    if ($args =~ /^config_channel\s+(\S+?)\s+(\S+?)=(\S+?)$/){
+        my $var_channel = $1;
+        my $var_name    = $2;
+        my $var_value   = $3;
+        print "INFO: Interface::config_channel() '$var_channel' :: '$var_name'='$var_value'\n";
+        
+        Kraken->choose_channel($var_channel);
+        Kraken->var($var_name, $var_value);
+        #my $kraken_ins = Kraken->new();
+        #print Dumper(\$kraken_ins->{channels}->{$var_channel});
+        #Kraken->channels_list();
+        return 1
+    }
+    return 0
+}
+
+sub open_channel {
+    my $self = shift;
+    my $args = join " ", @_;
+    if ($args =~ /^open_channel\s+(\S+?)$/){
+        my $var_channel = $1;
+        print "INFO: Interface::open_channel() '$var_channel'\n";
+        Kraken->choose_channel($var_channel);
+        Kraken->open_channel();
+        return 1
+    }
+    return 0
+}
+sub send_data {
+    my $self=shift;
+    my $args = join " ", @_;
+ #   print "sub: Interface send_data ===> '$args'\n";
+    return 0
+}
+1;
+

@@ -1,0 +1,55 @@
+
+Channel commands:
+
+add_channel <channel name> Add channel. Need to be run before channel configuration. 
+config_channel <channel name> <variable name>=<value> Set channel configuration
+open_channel <channel_name>   Open channel connection
+close_channel <channel_name>  Close all channel connections
+delete_channel <channel_name> Close channel and remove from configuration
+list_channel Return list of channels
+list_clients <channel name> Return list of clients connected to channel. Format: <client id> <address>:<port>
+list_file <channel_name> Return list of opened files. 
+
+
+Sending commands:
+
+send <channel name> <count>|<*> : Send defined number of messages to all clients connected to channel. Or all messages till end of file
+set_position <channel name> <source name> <position> : Go to defined position in source file. <position> is a line number or packet number
+get_position <channel name> <source name> <position> : Return current line number in opened file
+
+
+Configuration commands:
+config_channel <channel_name> <variable name>=<value>
+    where <variable name>:
+    
+    address            : Ip address
+    port               : Port
+    protocol           : tcp, tcp_client, udp, udp_client, multicast, multicast_client
+    incoming_processor : Path to program for processing incoming messages
+    outgoing_processor : Path to program for processing outgoing messages
+                         Processors must read data from stdin and print processed data to stdout
+    repeat             : repeat number. Useful for "send <channel> *";
+    rate               : Msg per seconds. Sending rate
+
+add_file <channel_name> <source name>=<file_path> : add messages source file. One channel can work with several files. 
+select_file <channel_name> <source name>          : select active file 
+read_mode <channel name> <source name>=<mode>     : Set file read mode 'plain' or 'packet'
+
+#############################
+Example of configuration
+#!/bin/sh
+dest="172.26.2.124 22222"
+Kraken.pl $dest
+echo "add_channel    channel_1"                                                 | nc $dest 
+echo "config_channel channel_1 protocol=tcp"                                    | nc $dest
+echo "config_channel channel_1 address=172.26.2.124"                            | nc $dest
+echo "config_channel channel_1 port=33633"                                      | nc $dest
+echo "config_channel channel_1 incoming_processor=/home/dmitryko/in_prep.pl"    | nc $dest
+echo "config_channel channel_1 outgoing_processor=/home/dmitryko/out_prep.pl"   | nc $dest
+echo "config_channel channel_1 repeat=5"                                        | nc $dest
+echo "config_channel channel_1 rate=50"                                         | nc $dest
+echo "add_file       channel_1 file_1=/home/dmitryko/qqq.txt"                   | nc $dest
+echo "read_mode      channel_1 file_1=plain"                                    | nc $dest
+echo "open_channel   channel_1"                                                 | nc $dest
+
+
