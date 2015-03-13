@@ -34,7 +34,7 @@ sub callback {
         push @{ $self->{cb_list} } , $callback ;
         return 1;
     }
-    return $self->{cb_list};
+    return 1;
 }
 
 sub cb_list {
@@ -45,9 +45,12 @@ sub cb_list {
 sub run_callback {
     my $self = _get_self_(shift);
     for my $cb ( $self->cb_list() ){
-        last if $self->$cb(@_);
+        if ($self->$cb(@_) ){
+          #print "Interface::run_callback()  arguments: @_\n";
+          last 
+        }
     }
-    return 0
+    return 1
 }
 
 Interface->callback("help");
@@ -61,6 +64,7 @@ Interface->callback(list_clients);
 Interface->callback(add_file);
 Interface->callback(select_file);
 Interface->callback(read_mode);
+Interface->callback(file_open);
 Interface->callback(file_list);
 Interface->callback(set_position);
 Interface->callback(get_position);
@@ -150,6 +154,7 @@ sub add_file {
         Kraken->choose_channel($channel);
         Kraken->choose_file($alias) ;
         Kraken->file_name($path);
+        Kraken->send_client($index, "add_file: OK\n");
         return 1
     }
     return undef
@@ -170,7 +175,6 @@ sub select_file {
     }
     return undef
 }
-
 sub read_mode {
     my $self  = shift;
     my $index = shift;
@@ -179,9 +183,34 @@ sub read_mode {
         my $channel = $1;
         my $alias   = $2;
         my $mode    = $3;
-        Kraken->choose_channel($channel);
-        Kraken->choose_file($alias) ;
-        Kraken->file_mode($mode);
+        Kraken->choose_channel($channel);    # select active channel 
+        Kraken->choose_file($alias) ;        # select active file
+        my $open_error = Kraken->file_mode($mode);
+        Kraken->send_client($index, "read_mode: File $alias read mode set to '$mode'\n");
+        return 1
+    }
+    return 0
+}
+
+
+sub file_open {
+    my $self  = shift;
+    my $index = shift;
+    my $args  = join " ", @_;
+    if ($args =~ /^file_open\s+(\S+?)\s+(\S+?)$/){ # mode 
+        my $channel = $1;
+        my $alias   = $2;
+        Kraken->choose_channel($channel);    # select active channel 
+        Kraken->choose_file($alias) ;        # select active file
+        my $return  = Kraken->file_open($mode);
+        unless ($return ){
+            
+            my $error  = Kraken->error();
+            my $file = Kraken->file_name();
+            Kraken->send_client($index, "ERROR: file '$file'  open failed: $error\n");
+            return 0;
+        }
+        Kraken->send_client($index, "file_open: OK\n");
         return 1
     }
     return 0
@@ -275,20 +304,6 @@ sub close_channel {
     return 0
 }
 
-sub start_autosend { 
-    my $self  = shift;
-    my $index = shift;
-    my $args  = join " ", @_;
-    if ($args =~ /^autosend\s+(\S+)$/){
-        my $channel = $1;   
-        Kraken->choose_channel($channel);
-        my $rate = Kraken->rate();
-        my $wait = Kraken->waitclient() || 0;
-        my $repeat = Kraken->repeat()   || 1
-    }
-}
-
-
 sub send_data { 
     my $self  = shift;
     my $index = shift;
@@ -310,9 +325,14 @@ sub send_data {
          $count*=$repeat; 
     }
         
+    print "info:  Queue sending of $count messages\n";
+    #Kraken->var('rate',2);
     for (my $i = 0 ; $i < $count ; $i++){
             Kraken->queue($index, "send_to_channel $channel");
     }
+    #Kraken->queue_length();
+    #Kraken->queue_list();
+    Kraken->send_client($index, "send_to_channel: QUEUED : \n");
     return 1;
 }
 
@@ -322,55 +342,103 @@ sub send_to_channel {
     my $args  = join " ", @_;
     return undef unless ( $args =~ /^send_to_channel\s+(\S+)/ );
     my $channel = $1;
+    Kraken->choose_channel($channel);
     
     # Сравниваем текущее время с временем хранящемся в 'ignore_until'
     # если еще рано то добавляемся в конец очереди 
     
-    Kraken->choose_channel($channel);
     if (my $ignore_until = Kraken->var('ignore_until')){
-        my ($seconds, $microseconds) = gettimeofday; 
+        my ($seconds, $microseconds) = gettimeofday(); 
+        $microseconds = sprintf("%06d", $microseconds);
         $seconds.=$microseconds;
-        #print "Ignore until $seconds $ignore_until\n";
-        if ($seconds < $ignore_until){
+        
+        
+        my $delta_time = $seconds-$ignore_until;
+        
+        #print "1: Current_time='$seconds' ignore_until='$ignore_until' delta_time='$delta_time'\n";
+        
+        if ($seconds < $ignore_until){ # текущее  время меньше чем время постинга, пихаем свой же запрос в конец очереди
             Kraken->queue($index, "$args");
-            return 1;
-            }
-        Kraken->var('ignore_until',0);
+            return 0;
+        }else{
+           #print "2: Current_time='$seconds' ignore_until='$ignore_until' delta_time='$delta_time'\n";
         }
+
+        Kraken->var('ignore_until',0);
+    }
      
-     my $data = Kraken->get_data(); 
-     
+      
+     my $data;
+     if ( Kraken->get_data() ){
+          $data = Kraken->readbuf();
+     }else{
+          print "ERROR: cannot get data\n"
+     }
+
+
      # Если дошли до конца файла и требуется поатор то перематывает на начало
-     unless (defined $data){
+     if ( Kraken->file_eof() ){
+        warn "no data readed: rewind to file beginning \n";
         Kraken->send_client($index, "EOF reached.\n");
-        Kraken->file_goto(0);
         Kraken->file_eof(0);
+        Kraken->file_goto(0); # перемотали обратно
         Kraken->queue($index, "$args");
-        return undef;
+        return 0;
      }
      
      foreach my $idx (Kraken->get_indexes_by_channel($channel)){
-        #print "send to client $idx $data\n";
-        my $code = Kraken->send_client($idx, $data); 
+        my $i_socket    = Kraken->get_socket($idx);
+        next unless $i_socket->peerhost();
+
+        #print "Interface::send_to_channel() $idx $data\n";
+        
+        #usleep(50);   
+        
+        my ($seconds, $microseconds) = gettimeofday(); 
+        $microseconds=sprintf('%06d',$microseconds);
+        $seconds.=$microseconds;
+        #print "SEC $seconds ";
+        my $code = Kraken->send_client($idx, $data); # send to channel 
+        
         if ($code == 1){
             Kraken->send_client($index, "send: OK: \n");
-            }
-        elsif (! defined $code){
+        } elsif (! defined $code){
             Kraken->send_client($index, "send: ERROR \n" );
-            }
+        } else {
+            Kraken->send_client($index, "send: ERROR  target socket is closed\n" );
         }
+     }
         
         # Смотрим на 'rate' вычисляем время после которого можно постить
         if (my $rate = Kraken->var('rate') ){
-            #print "Rate = $rate\n";
-            my ($seconds, $microseconds) = gettimeofday; 
+            my ($seconds, $microseconds) = gettimeofday(); 
+            $microseconds = sprintf("%06d", $microseconds);
             $seconds.=$microseconds;
+            
+            #print "Rate=$rate Sec=$seconds Usec=$microseconds\n";
+            
             $seconds+=int(10**6/$rate);
             #print "set ignore_until=$seconds\n";
             Kraken->var('ignore_until',$seconds);
         }
 return 1;
 }
+
+sub send_from_buffer {
+    my $self  = shift;
+    my $index = shift; # от кого пришла команда и кому слать ответ
+    my $args  = join " ", @_;
+    return undef unless ( $args =~ /^send_from_buffer\s+(\S+)/ );
+    my $index = $1;
+    my $channel = $self->get_channel_name($index);                                                                                                                        
+    Kraken->choose_channel($channel);
+    my $data = Kraken->_buffer_();
+    return undef unless $data;
+    my $code = Kraken->send_client($idx, $data); 
+    Kraken->_buffer_(undef);
+    return 1;
+}
+
 
 sub list_channel {
     my $self  = shift;

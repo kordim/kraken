@@ -22,11 +22,26 @@ sub var {
     if (@_){
         $self->{$name} = shift;
         return 1;
-        #print "var set: $name = $self->{$name}\n";
     }
    return $self->{$name} || undef;
-  #print "var get: $name = $self->{$name}\n";
 }
+
+#sub var {
+#    my $self = shift;
+#    my $name = shift;
+#    if (@_){
+#        my $value = shift;
+#        if ($value ne ''){
+#          $self->{$name} = $value;
+#        }elsif(exists $self->{$name}){
+#             delete $self->{$name};
+#        }
+#        return 1;
+#        #print "var set: $name = $self->{$name}\n";
+#    }
+#   return $self->{$name} || undef;
+#  #print "var get: $name = $self->{$name}\n";
+#}
 
 
 
